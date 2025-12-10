@@ -382,12 +382,10 @@ $Global:LogDirectory = $runFolder;
 
 # Check for the Azure AD and Exchange Online Management Modules, and install if not already available
 Out-LogFile "Checking for PowerShell module prerequisites"
-if ((Get-Module -ListAvailable -Name ExchangeOnlineManagement).Version.Major -lt 3) {
+if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement | Where-Object { $_.Version.Major -ge 3 })) {
     try {
-        Out-LogFile "Uninstalling old versions of the ExchangeOnlineManagement module (< 3.1.0)"
-        Uninstall-Module ExchangeOnlineManagement -AllVersions -Force -ErrorAction SilentlyContinue
         Out-LogFile "Installing ExchangeOnlineManagement module";
-        Install-Module -Scope CurrentUser -Name ExchangeOnlineManagement -RequiredVersion 3.1.0 -Force
+        Install-Module -Scope CurrentUser -Name ExchangeOnlineManagement -RequiredVersion 3.1.0 -Force -SkipPublisherCheck
     }
     catch {
         Write-Error $_.Exception.Message;
