@@ -121,8 +121,8 @@ Param (
     [Switch]$Interactive,
     [String]$JobName,
     [System.IO.FileInfo]$WorkingDirectory,
-    [ValidateSet("O365China","O365Default","O365GermanyCloud","O365USGovDoD","O365USGovGCCHigh")][String]$ExchangeEnvironmentName,
-    [ValidateSet("AzureChinaCloud","AzureCloud","AzureGermanyCloud","AzurePPE","AzureUSGovernment")][String]$AzureEnvironmentName
+    [ValidateSet("O365China", "O365Default", "O365GermanyCloud", "O365USGovDoD", "O365USGovGCCHigh")][String]$ExchangeEnvironmentName,
+    [ValidateSet("AzureChinaCloud", "AzureCloud", "AzureGermanyCloud", "AzurePPE", "AzureUSGovernment")][String]$AzureEnvironmentName
 );
 
 #...................................
@@ -143,14 +143,14 @@ Function Out-Summary {
 
     # Get _CRTReportSummary.txt file path
     $SummaryFile = Join-path $LogDirectory "_CRTReportSummary.txt";
-    if(-not(Test-Path $SummaryFile)) {
+    if (-not(Test-Path $SummaryFile)) {
         # Create new _CRTReportSummary.txt file
         [string]$ReportHeader = "##################################################################`r####### CrowdStrike Reporting Tool for Azure (CRT) Summary #######`r#################################################################`r`rReview the following findings from your query for anomalies. Refer to the investigative tips in each section for guidance.";
         $ReportHeader | Out-File -FilePath $SummaryFile
     };
 
-    if($NewReport) {
-        [string]$sumstring = ("`r### " + $string +  "  ###")
+    if ($NewReport) {
+        [string]$sumstring = ("`r### " + $string + "  ###")
     }
     elseif ($Summary) {        
         [string]$sumstring = ($string)
@@ -211,22 +211,40 @@ Function Out-LogFile {
 # Function to add an object to the cache
 function CacheObject ($Object) {
     if ($Object) {
-        if (-not $script:ObjectByObjectClassId.ContainsKey($Object.ObjectType)) {
-            $script:ObjectByObjectClassId[$Object.ObjectType] = @{}
+        $id = $Object.Id
+        if (-not $id) { $id = $Object.ObjectId }
+
+        $type = $Object.ObjectType
+        if (-not $type -and $Object.AdditionalProperties -and $Object.AdditionalProperties.ContainsKey("@odata.type")) {
+            $type = $Object.AdditionalProperties["@odata.type"].Replace("#microsoft.graph.", "")
+            $type = $type.Substring(0, 1).ToUpper() + $type.Substring(1)
         }
-        $script:ObjectByObjectClassId[$Object.ObjectType][$Object.ObjectId] = $Object;
-        $script:ObjectByObjectId[$Object.ObjectId] = $Object
+
+        # Ensure compatibility properties exist
+        if (-not $Object.Psobject.Properties.Match('ObjectId')) {
+            $Object | Add-Member -MemberType NoteProperty -Name "ObjectId" -Value $id -Force
+        }
+        if (-not $Object.Psobject.Properties.Match('ObjectType')) {
+            $Object | Add-Member -MemberType NoteProperty -Name "ObjectType" -Value $type -Force
+        }
+
+        if (-not $script:ObjectByObjectClassId.ContainsKey($type)) {
+            $script:ObjectByObjectClassId[$type] = @{}
+        }
+        $script:ObjectByObjectClassId[$type][$id] = $Object;
+        $script:ObjectByObjectId[$id] = $Object
     }
 };
 
-# Function to retrieve an object from the cache (if it's there), or from Azure AD (if not).
+# Function to retrieve an object from the cache (if it's there), or from Microsoft Graph (if not).
 function GetObjectByObjectId ($ObjectId) {
     if (-not $script:ObjectByObjectId.ContainsKey($ObjectId)) {
-        Write-Verbose ("Querying Azure AD for object '{0}'" -f $ObjectId);
+        Write-Verbose ("Querying Microsoft Graph for object '{0}'" -f $ObjectId);
         try {
-            $object = Get-AzureADObjectByObjectId -ObjectId $ObjectId;
+            $object = Get-MgDirectoryObject -DirectoryObjectId $ObjectId
             CacheObject -Object $object
-        } catch {
+        }
+        catch {
             Write-Verbose "Object not found."
         }
     };
@@ -234,18 +252,8 @@ function GetObjectByObjectId ($ObjectId) {
 };
 
 function GetOAuth2PermissionGrants ([switch]$FastMode) {
-    if ($FastMode) {
-        Get-AzureADOAuth2PermissionGrant -All $true
-    } else {
-        $script:ObjectByObjectClassId['ServicePrincipal'].GetEnumerator() | ForEach-Object { $i = 0 } {
-            Write-Progress -Activity "Retrieving delegated permissions..." `
-                            -Status ("Checked {0}/{1} apps" -f $i++, $servicePrincipalCount) `
-                            -PercentComplete (($i / $servicePrincipalCount) * 100);
-
-            $client = $_.Value;
-            Get-AzureADServicePrincipalOAuth2PermissionGrant -ObjectId $client.ObjectId
-        }
-    }
+    # MgGraph does not have the pagination bug, so we can just retrieve all.
+    Get-MgOauth2PermissionGrant -All
 };
 
 #..............................................
@@ -271,7 +279,7 @@ if ($Commands) {
         "DelegateAppPerms",
         "AdminAuditLogConfig"
     );
-    $SplitChar = [regex]::Match($Commands,"\W").Value;
+    $SplitChar = [regex]::Match($Commands, "\W").Value;
     $allCommands = $Commands.Split($SplitChar);
     $goodCommands = 0;
     foreach ($CommandFound in $allCommands) {
@@ -310,7 +318,8 @@ if ($WorkingDirectory -and $JobName) {
     if (-not (Test-Path -Path $runFolder)) {
         New-Item -Path $runFolder -ItemType "directory" | Out-Null
     }
-} elseif ($WorkingDirectory) {
+}
+elseif ($WorkingDirectory) {
     if (-not (Test-Path -Path $WorkingDirectory)) {
         New-Item -Path $WorkingDirectory -ItemType "directory" | Out-Null
     };
@@ -323,7 +332,8 @@ if ($WorkingDirectory -and $JobName) {
     if (-not (Test-Path -Path $runFolder)) {
         New-Item -Path $runFolder -ItemType "directory" | Out-Null
     }
-} elseif ($JobName) {
+}
+elseif ($JobName) {
     if (-not (Test-Path -Path $JobName)) {
         New-Item -Path $JobName -ItemType "directory" | Out-Null
     };
@@ -335,7 +345,8 @@ if ($WorkingDirectory -and $JobName) {
     if (-not (Test-Path -Path $runFolder)) {
         New-Item -Path $runFolder -ItemType "directory" | Out-Null
     }
-} else {
+}
+else {
     $baseFolder = (Get-Item -Path .).FullName;
     
     $runTime = Get-Date -Format "yyyyMMddTHHmm";
@@ -348,7 +359,8 @@ if ($WorkingDirectory -and $JobName) {
 
 if ($JobName) {
     $baseFolderName = $JobName
-} else {
+}
+else {
     $baseFolderName = (Get-Item -Path $baseFolder).Name
 };
 
@@ -376,18 +388,20 @@ if ((Get-Module -ListAvailable -Name ExchangeOnlineManagement).Version.Major -lt
         Uninstall-Module ExchangeOnlineManagement -AllVersions -Force -ErrorAction SilentlyContinue
         Out-LogFile "Installing ExchangeOnlineManagement module";
         Install-Module -Scope CurrentUser -Name ExchangeOnlineManagement -RequiredVersion 3.1.0 -Force
-    } catch {
+    }
+    catch {
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to install module ExchangeOnlineManagement."
     }
 };
-if (-not (Get-Module -ListAvailable  -Name AzureAD)) {
+if (-not (Get-Module -ListAvailable  -Name Microsoft.Graph)) {
     try {
-        Out-LogFile "Installing AzureAD module";
-        Install-Module -Scope CurrentUser -Name AzureAD -Force
-    } catch {
+        Out-LogFile "Installing Microsoft.Graph module";
+        Install-Module -Scope CurrentUser -Name Microsoft.Graph -Force
+    }
+    catch {
         Write-Error $_.Exception.Message;
-        Write-Host -ForegroundColor Red "[!] Unable to install module AzureAD."
+        Write-Host -ForegroundColor Red "[!] Unable to install module Microsoft.Graph."
     }
 };
 
@@ -398,7 +412,8 @@ if (-not (Get-Module -ListAvailable  -Name AzureAD)) {
 # Create a login credential variable
 if ($BasicAuth -and (-not $loginCreds)) {
     $Global:loginCreds = Get-Credential
-} elseif (-not $BasicAuth) {
+}
+elseif (-not $BasicAuth) {
     Write-Host -ForegroundColor Yellow "NOTE: Using default authentication. This method will prompt you for login credentials multiple times.";
     Start-Sleep -Seconds 5
 };
@@ -427,14 +442,16 @@ Out-LogFile "Beginning authentication";
 Out-LogFile "Authenticating to Exchange Online";
 try {
     if ($BasicAuth) {
-        if($ExchangeEnvironmentName) {
-            Connect-ExchangeOnline -Credential $loginCreds -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null}
+        if ($ExchangeEnvironmentName) {
+            Connect-ExchangeOnline -Credential $loginCreds -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null
+        }
         else {
             Connect-ExchangeOnline -Credential $loginCreds -ShowBanner:$false -ErrorAction Stop 6>$null
         }
 
-    } else {
-        if($ExchangeEnvironmentName) {
+    }
+    else {
+        if ($ExchangeEnvironmentName) {
             Connect-ExchangeOnline -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null
         }
         else {
@@ -442,36 +459,40 @@ try {
         }
     };
     Out-LogFile "Successfully connected to Exchange Online"
-} catch {
-    if($_.Exception.Message -match "you have exceeded the maximum number of connections allowed"){
+}
+catch {
+    if ($_.Exception.Message -match "you have exceeded the maximum number of connections allowed") {
         try {
             Disconnect-ExchangeOnline -Confirm:$false 6>$null;
             Out-LogFile "Disconnected from previous Exchange Online session(s)"
-        } catch {
+        }
+        catch {
             throw $_.Exception.Message
         };
         try {
             if ($BasicAuth) {
-                if($ExchangeEnvironmentName) {
+                if ($ExchangeEnvironmentName) {
                     Connect-ExchangeOnline -Credential $loginCreds -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null
                 }
                 else {
                     Connect-ExchangeOnline -Credential $loginCreds -ShowBanner:$false -ErrorAction Stop 6>$null
                 }
             }
-             else {
-                if($ExchangeEnvironmentName) {
-                Connect-ExchangeOnline -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null
+            else {
+                if ($ExchangeEnvironmentName) {
+                    Connect-ExchangeOnline -ExchangeEnvironmentName $ExchangeEnvironmentName -ShowBanner:$false -ErrorAction Stop 6>$null
                 }
                 else {
-                Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop 6>$null
+                    Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop 6>$null
                 }
             };
             Out-LogFile "Successfully connected to Exchange Online"
-        } catch {
+        }
+        catch {
             throw $_.Exception.Message
         }
-    } else {
+    }
+    else {
         throw $_.Exception.Message
     }
 };
@@ -482,7 +503,8 @@ try {
 $moduleMessage = "Retrieving Federation configuration information";
 if ($Commands -and $Commands -notmatch "FedConfig") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -490,7 +512,7 @@ if ($Commands -and $Commands -notmatch "FedConfig") {
     $continue = $null;
     do {
         if ($startTimer.Elapsed.Seconds -gt $InteractiveWaitSeconds) {
-            $continue = $true;;
+            $continue = $true; ;
         };
         if ([Console]::KeyAvailable) {
             $keyPress = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown');
@@ -498,8 +520,9 @@ if ($Commands -and $Commands -notmatch "FedConfig") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -512,17 +535,19 @@ if ($continue) {
     };
     try {
         $FedConfig = Get-FederatedOrganizationIdentifier -IncludeExtendedDomainInfo;
-        if($null -ne $FedConfig) {
+        if ($null -ne $FedConfig) {
             try {
                 $FedConfig | Out-File "$reportsFolder\FederationConfiguration.txt"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write 'FederationConfiguration.txt' to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write 'FederationConfiguration.txt' to disk"
             };
             try {
                 $FedConfig | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\FederationConfiguration.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write 'FederationConfiguration.json' to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write 'FederationConfiguration.json' to disk"
@@ -535,19 +560,22 @@ if ($continue) {
                 - Review existing Federations. Identify unauthorized or unrecognized Federations then revoke them.
                 - Threat actors can create unauthorized federations and use them to log into your tenant and perform actions. The user accounts used to do this will not appear in your directory, thereby allowing the threat actor to persist longer.
                 - NOTE: This is a known SUNBURST TTP." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging the Federation Configuration query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging the Federation Configuration query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Federation configuration. Check user permissions" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Federation configuration. Check user permissions"
     };
     # End Module Run
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -562,7 +590,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Federation trust information"
 if ($Commands -and $Commands -notmatch "FedTrust") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -578,8 +607,9 @@ if ($Commands -and $Commands -notmatch "FedTrust") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -592,11 +622,12 @@ if ($continue) {
     };
     try {
         $FedTrust = Get-FederationTrust;
-        if($null -ne $FedTrust) {
+        if ($null -ne $FedTrust) {
             try {
                 $FedTrust | Format-List | Out-File "$reportsFolder\FederationTrust.txt";
                 $FedTrust | ConvertTo-Json | Out-File "$jsonFolder\FederationTrust.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -607,18 +638,21 @@ if ($continue) {
                 Out-Summary "[+] Review Federation Trust. Output saved to '$runFolderShort\Reports\FederationTrust.txt'";
                 Out-Summary "`rINVESTIGATIVE TIPS:
                 - Review the certificates for the trust. Investigate any recent changes based on date and ensure they are authorized & expected." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Federation trust information" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Federation trust information"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -633,7 +667,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Client Access Settings Configured on Mailboxes";
 if ($Commands -and $Commands -notmatch "ClientAccess") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -649,8 +684,9 @@ if ($Commands -and $Commands -notmatch "ClientAccess") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -664,11 +700,12 @@ if ($continue) {
     $ClientAccessSettings = $null;
     try {
         [array]$ClientAccessSettings = Get-EXOCASMailbox -ResultSize Unlimited;
-        if($ClientAccessSettings.Count -gt 0) {
+        if ($ClientAccessSettings.Count -gt 0) {
             try {
                 $ClientAccessSettings | Export-Csv "$reportsFolder\ClientAccessSettingsMailboxes.csv" -NoTypeInformation -Encoding Default;
                 $ClientAccessSettings | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\ClientAccessSettingsMailboxes.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -683,18 +720,21 @@ if ($continue) {
                 - Review for any legacy protocols being used (SMTP, IMAP, ActiveSync, POP, etc.).
                 - Legacy protocols can be used to access sensitive data without using MFA.
                 - Risk for being used for testing password stuffing attacks which can later be used to try to log into VPNs without MFA." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Client Access Settings Configured on Mailboxes" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Client Access Settings Configured on Mailboxes"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -709,7 +749,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mail Forwarding Rules for Remote Domains";
 if ($Commands -and $Commands -notmatch "RemoteDomains") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -725,8 +766,9 @@ if ($Commands -and $Commands -notmatch "RemoteDomains") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -739,12 +781,13 @@ if ($continue) {
     };
     $RemoteDomains = $null;
     try {
-        [array]$RemoteDomains = Get-RemoteDomain | Select-Object Name,DomainName,AllowedOOFType,AutoForwardEnabled;
-        if($RemoteDomains.Count -gt 0) {
+        [array]$RemoteDomains = Get-RemoteDomain | Select-Object Name, DomainName, AllowedOOFType, AutoForwardEnabled;
+        if ($RemoteDomains.Count -gt 0) {
             try {
                 $RemoteDomains | Export-Csv "$reportsFolder\RemoteDomainNames.csv" -NoTypeInformation -Encoding Default;
                 $RemoteDomains | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\RemoteDomainNames.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -761,18 +804,21 @@ if ($continue) {
                 - Ability to forward to remote domains should be either disabled or restricted.
                 - The default setting when remote forwarding is enabled is a wildcard (“*”) but domains list should be limited to trusted & approved email domains, such as for subsidiaries/parent organizations and contractor staff.
                 - Retrieving hidden rules is outside of this tool's scope." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Mail Forwarding Rules for Remote Domains" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Mail Forwarding Rules for Remote Domains"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -787,7 +833,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mailbox SMTP forwarding rules for all mailboxes";
 if ($Commands -and $Commands -notmatch "SMTPForward") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -803,8 +850,9 @@ if ($Commands -and $Commands -notmatch "SMTPForward") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -817,12 +865,13 @@ if ($continue) {
     };
     $SMTPForward = $null;
     try {
-        [array]$SMTPForward = Get-EXOMailbox -PropertySets Minimum,Delivery -ResultSize Unlimited | Where-Object {($_.ForwardingAddress -ne $null -or $_.ForwardingSMTPAddress -ne $null)} | Select-Object Name,ForwardingAddress,ForwardingSMTPAddress,DeliverToMailboxAndForward;
-        if($SMTPForward.Count -gt 0) {
+        [array]$SMTPForward = Get-EXOMailbox -PropertySets Minimum, Delivery -ResultSize Unlimited | Where-Object { ($_.ForwardingAddress -ne $null -or $_.ForwardingSMTPAddress -ne $null) } | Select-Object Name, ForwardingAddress, ForwardingSMTPAddress, DeliverToMailboxAndForward;
+        if ($SMTPForward.Count -gt 0) {
             try {
                 $SMTPForward | Export-Csv "$reportsFolder\MailForwardingRules.csv" -NoTypeInformation -Encoding Default;
                 $SMTPForward | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\MailForwardingRules.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -836,18 +885,21 @@ if ($continue) {
                 Out-Summary "`rINVESTIGATIVE TIPS:
     - Review all forwarding addresses for each mailbox and verify they are legitimate and approved.
     " -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Mailbox SMTP forwarding rules for all mailboxes" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Mailbox SMTP forwarding rules for all mailboxes"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -862,7 +914,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mail Transport Rules";
 if ($Commands -and $Commands -notmatch "TransportRules") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -878,8 +931,9 @@ if ($Commands -and $Commands -notmatch "TransportRules") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -893,11 +947,12 @@ if ($continue) {
     $TransportRules = $null;
     try {
         [array]$TransportRules = Get-TransportRule -ResultSize Unlimited;
-        if($TransportRules.Count -gt 0) {
+        if ($TransportRules.Count -gt 0) {
             try {
-                $TransportRules | Select-Object Name,IsValid,WhenChanged,LastModifiedBy,ActivationDate,ExpiryDate,Mode,State,Actions | Export-Csv "$reportsFolder\MailTransportRules.csv" -NoTypeInformation -Encoding Default;
+                $TransportRules | Select-Object Name, IsValid, WhenChanged, LastModifiedBy, ActivationDate, ExpiryDate, Mode, State, Actions | Export-Csv "$reportsFolder\MailTransportRules.csv" -NoTypeInformation -Encoding Default;
                 $TransportRules | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\MailTransportRules.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -911,18 +966,21 @@ if ($continue) {
                 Out-Summary "`rINVESTIGATIVE TIPS:
     - Review all forwarding addresses for each transport rule and verify they are legitimate and approved.
     " -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Mail Transport Rules" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Mail Transport Rules"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -937,7 +995,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mailbox Delegates where 'Full Access' permission is granted";
 if ($Commands -and $Commands -notmatch "FullAccessGranted") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -953,8 +1012,9 @@ if ($Commands -and $Commands -notmatch "FullAccessGranted") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -969,42 +1029,46 @@ if ($continue) {
     $FullAccessPerms = @();
     $FullAccessPermsResults = @();
     try {
-        $FullAccessPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue | foreach {$_.PrimarySmtpAddress.Replace("'","")}| Get-EXOMailboxPermission -ErrorAction Stop | Where-Object { ($_.AccessRights -eq "FullAccess") -and ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF")}
-    } catch {
-        if($_.Exception.Message -match "Cannot validate argument on parameter"){
+        $FullAccessPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue | foreach { $_.PrimarySmtpAddress.Replace("'", "") } | Get-EXOMailboxPermission -ErrorAction Stop | Where-Object { ($_.AccessRights -eq "FullAccess") -and ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF") }
+    }
+    catch {
+        if ($_.Exception.Message -match "Cannot validate argument on parameter") {
             try {
                 $incompleteRun = $true;
                 Out-LogFile "We ran into an error retrieving Mailbox Delegates where 'FullAccess' permission is granted. If a report is generated, it may not be complete." -warning;
                 Write-Host -ForegroundColor Red "[!] We ran into an error retrieving Mailbox Delegates where 'FullAccess' permission is granted. If a report is generated, it may not be complete.";
                 Write-Host -ForegroundColor Yellow "Try using the following command to obtain this report manually:"
                 Write-Host -ForegroundColor Yellow 'Get-EXOMailbox -ResultSize Unlimited | Get-EXOMailboxPermission | Where-Object { ($_.AccessRights -eq "FullAccess") -and ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF")} | Export-Csv "FullAccessPerms.csv" -NoTypeInformation -Encoding Default'
-            } catch {
+            }
+            catch {
                 Write-Error $_.Exception.Message
             }
-        } else {
+        }
+        else {
             throw $_.Exception.Message
         }
     };
-    if($FullAccessPerms.Count -gt 0) {
-        foreach ($obj in $FullAccessPerms){
+    if ($FullAccessPerms.Count -gt 0) {
+        foreach ($obj in $FullAccessPerms) {
             $ObjectProperties = [Ordered]@{
-                Identity = $obj | Select-Object -exp Identity
-                User = $obj | Select-Object -exp User
-                AccessRights = $obj | Select-Object -exp AccessRights
-                IsInherited = $obj | Select-Object -exp IsInherited
-                Deny = $obj | Select-Object -exp Deny
+                Identity        = $obj | Select-Object -exp Identity
+                User            = $obj | Select-Object -exp User
+                AccessRights    = $obj | Select-Object -exp AccessRights
+                IsInherited     = $obj | Select-Object -exp IsInherited
+                Deny            = $obj | Select-Object -exp Deny
                 InheritanceType = $obj | Select-Object -exp InheritanceType
             };
             $FullAccessPermsResults += New-Object -TypeName PSObject -Property $ObjectProperties
         };
         try {
-            if($incompleteRun) {
+            if ($incompleteRun) {
                 Out-LogFile "While some results returned, this report did not complete successfully. Please try running it manually." -warning;
                 Write-Host -ForegroundColor Yellow "[!] While some results returned, this report did not complete successfully. Please try running it manually."
             };
             $FullAccessPermsResults | Export-Csv "$reportsFolder\FullAccessPerms.csv" -NoTypeInformation -Encoding Default;
             $FullAccessPermsResults | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\FullAccessPerms.json"
-        } catch {
+        }
+        catch {
             Out-LogFile "Unable to write output to disk" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1018,13 +1082,15 @@ if ($continue) {
             Out-Summary "`rINVESTIGATIVE TIPS:
             - Check which accounts have 'Full Access' to mailboxes; ideally there should be a limited number of accounts with this access.
             - In some configurations an email gateway account (e.g., Proofpoint, Barracuda, etc) may require full access." -Summary
-        } catch {
+        }
+        catch {
             Out-LogFile "There was a problem logging this query" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
         }
     }
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1039,7 +1105,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mailbox Delegates where 'Any' permissions are granted";
 if ($Commands -and $Commands -notmatch "AnyAccessGranted") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1055,8 +1122,9 @@ if ($Commands -and $Commands -notmatch "AnyAccessGranted") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1071,42 +1139,46 @@ if ($continue) {
     $AnyAssignedPerms = @();
     $AnyAssignedPermsResults = @();
     try {
-        $AnyAssignedPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue |foreach {$_.PrimarySmtpAddress.Replace("'","")} | Get-EXOMailboxPermission -ErrorAction Stop | Where-Object { ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF")}
-    } catch {
-        if($_.Exception.Message -match "Cannot validate argument on parameter"){
+        $AnyAssignedPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue | foreach { $_.PrimarySmtpAddress.Replace("'", "") } | Get-EXOMailboxPermission -ErrorAction Stop | Where-Object { ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF") }
+    }
+    catch {
+        if ($_.Exception.Message -match "Cannot validate argument on parameter") {
             try {
                 $incompleteRun = $true;
                 Out-LogFile "We ran into an error retrieving Mailbox Delegates where 'Any' permissions are granted. If a report is generated, it may not be complete." -warning;
                 Write-Host -ForegroundColor Red "[!] We ran into an error retrieving Mailbox Delegates where 'Any' permissions are granted. If a report is generated, it may not be complete.";
                 Write-Host -ForegroundColor Yellow "Try using the following command to obtain this report manually:"
                 Write-Host -ForegroundColor Yellow 'Get-EXOMailbox -ResultSize Unlimited | Get-EXOMailboxPermission | Where-Object { ($_.IsInherited -eq $false) -and -not ($_.User -like "NT AUTHORITY\SELF")} | Export-Csv "AnyAssignedPerms.csv" -NoTypeInformation -Encoding Default'
-            } catch {
+            }
+            catch {
                 Write-Error $_.Exception.Message
             }
-        } else {
+        }
+        else {
             throw $_.Exception.Message
         }
     };
-    if($AnyAssignedPerms.Count -gt 0) {
-        foreach ($obj in $AnyAssignedPerms){
+    if ($AnyAssignedPerms.Count -gt 0) {
+        foreach ($obj in $AnyAssignedPerms) {
             $ObjectProperties = [Ordered]@{
-                Identity = $obj | Select-Object -exp Identity
-                User = $obj | Select-Object -exp User
-                AccessRights = $obj | Select-Object -exp AccessRights
-                IsInherited = $obj | Select-Object -exp IsInherited
-                Deny = $obj | Select-Object -exp Deny
+                Identity        = $obj | Select-Object -exp Identity
+                User            = $obj | Select-Object -exp User
+                AccessRights    = $obj | Select-Object -exp AccessRights
+                IsInherited     = $obj | Select-Object -exp IsInherited
+                Deny            = $obj | Select-Object -exp Deny
                 InheritanceType = $obj | Select-Object -exp InheritanceType
             };
             $AnyAssignedPermsResults += New-Object -TypeName PSObject -Property $ObjectProperties
         };
         try {
-            if($incompleteRun) {
+            if ($incompleteRun) {
                 Out-LogFile "While some results returned, this report did not complete successfully. Please try running it manually." -warning;
                 Write-Host -ForegroundColor Yellow "[!] While some results returned, this report did not complete successfully. Please try running it manually."
             };
             $AnyAssignedPermsResults | Export-Csv "$reportsFolder\AnyAssignedPerms.csv" -NoTypeInformation  -Encoding Default;
             $AnyAssignedPermsResults | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\AnyAssignedPerms.json"
-        } catch {
+        }
+        catch {
             Out-LogFile "Unable to write output to disk" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1119,13 +1191,15 @@ if ($continue) {
             Out-Summary "[+] Review Mailbox Delegates with 'Any' permissions. Output saved to '$runFolderShort\Reports\AnyAssignedPerms.csv'";
             Out-Summary "`rINVESTIGATIVE TIPS:
             - Look for any suspicious use of 'personal' like accounts with permissions to mailboxes." -Summary
-        } catch {
+        }
+        catch {
             Out-LogFile "There was a problem logging this query" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
         }
     }
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1140,7 +1214,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Mailbox Delegates where 'Send As' or 'SendOnBehalf' permission is granted";
 if ($Commands -and $Commands -notmatch "SendAsGranted") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1156,8 +1231,9 @@ if ($Commands -and $Commands -notmatch "SendAsGranted") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1172,42 +1248,47 @@ if ($continue) {
     $DelegateSendPerms = @();
     $DelegateSendPermsResults = @();
     try {
-        $DelegateSendPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue |foreach {$_.PrimarySmtpAddress.Replace("'","")}| Get-EXORecipientPermission -ErrorAction Stop | Where-Object {$_.Trustee -ne "NT AUTHORITY\SELF"}    
-    } catch {
-        if($_.Exception.Message -match "unauthorized"){
+        $DelegateSendPerms += Get-EXOMailbox -ResultSize Unlimited -ErrorAction SilentlyContinue | foreach { $_.PrimarySmtpAddress.Replace("'", "") } | Get-EXORecipientPermission -ErrorAction Stop | Where-Object { $_.Trustee -ne "NT AUTHORITY\SELF" }    
+    }
+    catch {
+        if ($_.Exception.Message -match "unauthorized") {
             try {
                 Out-LogFile "Unable to retrieve Mailbox Delegates where 'Send As' or 'SendOnBehalf' permission is granted. Requires 'Exchange Admin' role." -warning;
                 Write-Host -ForegroundColor Red "[!] Unable to retrieve Mailbox Delegates where 'Send As' or 'SendOnBehalf' permission is granted. Requires 'Exchange Admin' role. Skipping module..."
-            } catch {
+            }
+            catch {
                 Write-Error $_.Exception.Message
             }
-        } else {
+        }
+        else {
             throw $_.Exception.Message
         }
     };
     try {
-        $DelegateSendPerms += Get-EXOMailbox -ResultSize Unlimited | Where-Object {$_.GrantSendOnBehalfTo -ne $null}
-    } catch {
+        $DelegateSendPerms += Get-EXOMailbox -ResultSize Unlimited | Where-Object { $_.GrantSendOnBehalfTo -ne $null }
+    }
+    catch {
         Out-LogFile "Unable to retrieve Mailbox Delegates where where 'Send As' or 'SendOnBehalf' permission is granted" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Mailbox Delegates where where 'Send As' or 'SendOnBehalf' permission is granted"
     };
-    if($DelegateSendPerms.Count -gt 0) {
-        foreach ($obj in $DelegateSendPerms){
+    if ($DelegateSendPerms.Count -gt 0) {
+        foreach ($obj in $DelegateSendPerms) {
             $ObjectProperties = [Ordered]@{
-                Identity = $obj | Select-Object -exp Identity
-                Trustee = $obj | Select-Object -exp Trustee
+                Identity          = $obj | Select-Object -exp Identity
+                Trustee           = $obj | Select-Object -exp Trustee
                 AccessControlType = $obj | Select-Object -exp AccessControlType
-                AccessRights = $obj | Select-Object -exp AccessRights
-                IsInherited = $obj | Select-Object -exp IsInherited
-                InheritanceType = $obj | Select-Object -exp InheritanceType
+                AccessRights      = $obj | Select-Object -exp AccessRights
+                IsInherited       = $obj | Select-Object -exp IsInherited
+                InheritanceType   = $obj | Select-Object -exp InheritanceType
             };
             $DelegateSendPermsResults += New-Object -TypeName PSObject -Property $ObjectProperties
         };
         try {
             $DelegateSendPermsResults | Export-Csv "$reportsFolder\SendAsDelegates.csv" -NoTypeInformation  -Encoding Default;
             $DelegateSendPermsResults | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\SendAsDelegates.json"
-        } catch {
+        }
+        catch {
             Out-LogFile "Unable to write output to disk" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1221,13 +1302,15 @@ if ($continue) {
             Out-Summary "`rINVESTIGATIVE TIPS:
             - Look for any suspicious use of 'personal' like accounts with 'Send As' or 'SendOnBehalf' permissions.
             - Threat actors can take advantage for phishing campaigns as trusted users." -Summary
-        } catch {
+        }
+        catch {
             Out-LogFile "There was a problem logging this query" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
         }
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1242,7 +1325,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Exchange Online PowerShell enabled users";
 if ($Commands -and $Commands -notmatch "EXOPowerShell") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1258,8 +1342,9 @@ if ($Commands -and $Commands -notmatch "EXOPowerShell") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1272,12 +1357,13 @@ if ($continue) {
     };
     $EXOPowerShellUsers = $null;
     try {
-        [array]$EXOPowerShellUsers = Get-User -ResultSize unlimited | Select-Object Name,DisplayName,UserPrincipalName,RemotePowerShellEnabled,AccountDisabled;
-        if($EXOPowerShellUsers.Count -gt 0) {
+        [array]$EXOPowerShellUsers = Get-User -ResultSize unlimited | Select-Object Name, DisplayName, UserPrincipalName, RemotePowerShellEnabled, AccountDisabled;
+        if ($EXOPowerShellUsers.Count -gt 0) {
             try {
                 $EXOPowerShellUsers | Export-Csv -Path "$reportsFolder\EXOPowerShellUsers.csv" -NoTypeInformation  -Encoding Default;
                 $EXOPowerShellUsers | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\EXOPowerShellUsers.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1290,18 +1376,21 @@ if ($continue) {
                 Out-Summary "Review Exchange Online PowerShell enabled users. Output saved to '$runFolderShort\Reports\EXOPowerShellUsers.csv";
                 Out-Summary "`rINVESTIGATIVE TIPS:
                 - Look for any account that has Remote PowerShell enabled; attackers will typically use Exchange Online PowerShell to interact or exfiltrate emails out of the account because the activity is not monitored." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Exchange Online PowerShell enabled users" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Exchange Online PowerShell enabled users"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1316,7 +1405,8 @@ if ($continue) {
 $moduleMessage = "Retrieving 'Audit Bypass' enabled Exchange Online users";
 if ($Commands -and $Commands -notmatch "AuditBypassEnabled") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1332,8 +1422,9 @@ if ($Commands -and $Commands -notmatch "AuditBypassEnabled") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1347,12 +1438,13 @@ if ($continue) {
     Write-Host -ForegroundColor Yellow "This make take awhile; please be patient...";
     $AuditByPassEnabled = $null;
     try {
-        [array]$AuditByPassEnabled = Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object{$_.AuditBypassEnabled -eq $true} | Select-Object Name,AuditBypassEnabled;
-        if($AuditByPassEnabled.Count -gt 0) {
+        [array]$AuditByPassEnabled = Get-MailboxAuditBypassAssociation -ResultSize Unlimited | Where-Object { $_.AuditBypassEnabled -eq $true } | Select-Object Name, AuditBypassEnabled;
+        if ($AuditByPassEnabled.Count -gt 0) {
             try {
                 $AuditByPassEnabled | Export-Csv -Path "$reportsFolder\AuditByPassEnabledUsers.csv" -NoTypeInformation -Encoding Default;
                 $AuditByPassEnabled | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\AuditByPassEnabledUsers.json"
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1366,18 +1458,21 @@ if ($continue) {
                 Out-Summary "`rINVESTIGATIVE TIPS:
                 - Look for any account that has 'Audit Bypass' enabled; this option disables monitoring of the respective user account.
                 - Threat actors could target these accounts to evade detection - no Unified Search Audit Log events will be generated." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Audit Bypass enabled Exchange Online users" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Audit Bypass enabled Exchange Online users";
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1392,7 +1487,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Admin Audit log configuration settings";
 if ($Commands -and $Commands -notmatch "AdminAuditLogConfig") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1408,8 +1504,9 @@ if ($Commands -and $Commands -notmatch "AdminAuditLogConfig") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1421,34 +1518,38 @@ if ($continue) {
         Write-Host $InteractiveContMessage
     };
     Write-Host -ForegroundColor Yellow "This make take awhile; please be patient...";
-    try{
-    $AdminAuditLogConfig = Get-AdminAuditLogConfig
-            try {
+    try {
+        $AdminAuditLogConfig = Get-AdminAuditLogConfig
+        try {
                 
-                $AdminAuditLogConfig | Export-Csv -Path "$reportsFolder\AdminAuditLogConfig.csv" -NoTypeInformation -Encoding Default;
-                $AdminAuditLogConfig | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\AdminAuditLogConfig.json"
-            } catch {
-                Out-LogFile "Unable to write output to disk" -warning;
-                Write-Error $_.Exception.Message;
-                Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
-            };
-            try {
-                Out-LogFile "[+] Review 'Admin Audit Log Config'. The output was saved to '$runFolderShort\Reports\AdminAuditLogConfig.csv";
-                Out-Summary "[+] Review 'Admin Audit Log Config'. The output was saved to '$runFolderShort\Reports\AdminAuditLogConfig.csv";
-                Out-Summary "`rINVESTIGATIVE TIPS:
+            $AdminAuditLogConfig | Export-Csv -Path "$reportsFolder\AdminAuditLogConfig.csv" -NoTypeInformation -Encoding Default;
+            $AdminAuditLogConfig | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\AdminAuditLogConfig.json"
+        }
+        catch {
+            Out-LogFile "Unable to write output to disk" -warning;
+            Write-Error $_.Exception.Message;
+            Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
+        };
+        try {
+            Out-LogFile "[+] Review 'Admin Audit Log Config'. The output was saved to '$runFolderShort\Reports\AdminAuditLogConfig.csv";
+            Out-Summary "[+] Review 'Admin Audit Log Config'. The output was saved to '$runFolderShort\Reports\AdminAuditLogConfig.csv";
+            Out-Summary "`rINVESTIGATIVE TIPS:
                 - This output can be used to view the administrator audit logging configuration settings." -Summary
                 
-            } catch {
-                Out-LogFile "There was a problem logging this query" -warning;
-                Write-Error $_.Exception.Message;
-                Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
-            }
-    } catch {
+        }
+        catch {
+            Out-LogFile "There was a problem logging this query" -warning;
+            Write-Error $_.Exception.Message;
+            Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
+        }
+    }
+    catch {
         Out-LogFile "Unable to retrieve Admin Audit log information." -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Admin Audit log information.";
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1463,7 +1564,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Hidden Mailboxes from Exchange Online";
 if ($Commands -and $Commands -notmatch "HiddenMailboxes") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1479,8 +1581,9 @@ if ($Commands -and $Commands -notmatch "HiddenMailboxes") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1493,12 +1596,13 @@ if ($continue) {
     };
     $HiddenMailboxes = $null;
     try {
-        [array]$HiddenMailboxes = Get-EXORecipient -ResultSize Unlimited | Where-Object{$_.HiddenFromAddressListsEnabled -eq $true};
-        if($HiddenMailboxes.Count -gt 0) {
+        [array]$HiddenMailboxes = Get-EXORecipient -ResultSize Unlimited | Where-Object { $_.HiddenFromAddressListsEnabled -eq $true };
+        if ($HiddenMailboxes.Count -gt 0) {
             try {
                 $HiddenMailboxes | Export-Csv "$reportsFolder\HiddenMailboxes.csv" -NoTypeInformation -Encoding Default;
                 $HiddenMailboxes | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\HiddenMailboxes.json";
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1511,18 +1615,21 @@ if ($continue) {
                 Out-Summary "[+] Review Hidden Mailboxes from Exchange Online. Output saved to '$runFolderShort\Reports\HiddenMailboxes.csv'";
                 Out-Summary "`rINVESTIGATIVE TIPS:
                 - Look for suspicious mailboxes hidden from the Global Address List (GAL)." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Hidden Mailboxes from Exchange Online" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Hidden Mailboxes from Exchange Online"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1537,58 +1644,22 @@ if ($continue) {
 
 # Connect to Azure AD
 
+# Connect to Microsoft Graph
+
 Out-LogFile "Beginning authentication";
-Out-LogFile "Authenticating to Azure AD";
+Out-LogFile "Authenticating to Microsoft Graph";
 try {
-    if ($BasicAuth) {
-        if($AzureEnvironmentName) {
-        $ConnectAZD = Connect-AzureAD -AzureEnvironmentName $AzureEnvironmentName -Credential $loginCreds -ErrorAction Stop 6>$null
-        }
-        else {
-        $ConnectAZD = Connect-AzureAD -Credential $loginCreds -ErrorAction Stop 6>$null
-        }
-    } 
-    else {
-        if($AzureEnvironmentName) {
-        $ConnectAZD = Connect-AzureAD -AzureEnvironmentName $AzureEnvironmentName -ErrorAction Stop 6>$null
-        }
-        else {
-        $ConnectAZD = Connect-AzureAD -ErrorAction Stop 6>$null
-        }
-    };
-    Out-LogFile "Successfully connected to Azure AD"
-} catch {
-    if($_.Exception.Message -match "you have exceeded the maximum number of connections allowed"){
-        try {
-            Disconnect-AzureAD | Out-Null;
-            Out-LogFile "Disconnected from previous Azure AD session(s)"
-        } catch {
-            Write-Error $_.Exception.Message
-        };
-        try {
-            if ($BasicAuth) {
-                if($AzureEnvironmentName) {
-                $ConnectAZD = Connect-AzureAD -AzureEnvironmentName $AzureEnvironmentName -Credential $loginCreds -ErrorAction Stop 6>$null
-                }
-                else {
-                $ConnectAZD = Connect-AzureAD -Credential $loginCreds -ErrorAction Stop 6>$null
-                }
-            } 
-            else {
-                if($AzureEnvironmentName) {
-                $ConnectAZD = Connect-AzureAD -AzureEnvironmentName $AzureEnvironmentName -ErrorAction Stop 6>$null
-                }
-                else {
-                $ConnectAZD = Connect-AzureAD -ErrorAction Stop 6>$null
-                }
-            };
-            Out-LogFile "Successfully connected to Azure AD"
-        } catch {
-            throw $_.Exception.Message
-        }
-    } else {
-        throw $_.Exception.Message
+    $Scopes = "User.Read.All", "Directory.Read.All", "Application.Read.All", "DelegatedPermissionGrant.Read.All"
+    if ($AzureEnvironmentName) {
+        Connect-MgGraph -Environment $AzureEnvironmentName -Scopes $Scopes -ErrorAction Stop 6>$null
     }
+    else {
+        Connect-MgGraph -Scopes $Scopes -ErrorAction Stop 6>$null
+    }
+    Out-LogFile "Successfully connected to Microsoft Graph"
+}
+catch {
+    Write-Error $_.Exception.Message
 };
 
 #............................................................................................................................................
@@ -1597,7 +1668,8 @@ try {
 $moduleMessage = "Retrieving Azure AD Service Principal objects";
 if ($Commands -and $Commands -notmatch "KeyCredentials") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1613,8 +1685,9 @@ if ($Commands -and $Commands -notmatch "KeyCredentials") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1628,30 +1701,33 @@ if ($continue) {
     $ServicePrincipalQuery = $null;
     $ServicePrincipalObjects = @();
     try {
-        [array]$ServicePrincipalQuery = Get-AzureADServicePrincipal -all $true | Where-Object{$_.KeyCredentials -ne $null};
-        if($ServicePrincipalQuery.Count -gt 0) {
+        [array]$ServicePrincipalQuery = Get-MgServicePrincipal -All -Property Id, AppId, KeyCredentials, DisplayName | Where-Object { $_.KeyCredentials.Count -gt 0 };
+        if ($ServicePrincipalQuery.Count -gt 0) {
             $counter = 0;
-            ForEach($obj in $ServicePrincipalQuery) {
+            ForEach ($obj in $ServicePrincipalQuery) {
                 $counter += 1;
-                Write-Progress -Activity "Retrieving Service Principal Objects" -Status "In progress" -PercentComplete $(($counter/$ServicePrincipalQuery.Count)*100);
-                $KeyCred = $obj | Select-Object -exp KeyCredentials;
-                $ObjectProperties = [Ordered]@{
-                    "ObjectId" = ($obj.ObjectId | Out-String).Trim()
-                    "AppId" = ($obj.AppId | Out-String).Trim()
-                    "StartDate" = ($KeyCred.StartDate | Out-String).Trim()
-                    "EndDate" = ($KeyCred.EndDate | Out-String).Trim()
-                    "KeyId" = ($KeyCred.KeyId | Out-String).Trim()
-                    "Type" = ($KeyCred.Type | Out-String).Trim()
-                    "Usage" = ($KeyCred.Usage | Out-String).Trim()
-                };
-                $ServicePrincipalObjects += New-Object -TypeName PSObject -Property $ObjectProperties
+                Write-Progress -Activity "Retrieving Service Principal Objects" -Status "In progress" -PercentComplete $(($counter / $ServicePrincipalQuery.Count) * 100);
+                $KeyCreds = $obj.KeyCredentials
+                foreach ($KeyCred in $KeyCreds) {
+                    $ObjectProperties = [Ordered]@{
+                        "ObjectId"  = ($obj.Id | Out-String).Trim()
+                        "AppId"     = ($obj.AppId | Out-String).Trim()
+                        "StartDate" = ($KeyCred.StartDateTime | Out-String).Trim()
+                        "EndDate"   = ($KeyCred.EndDateTime | Out-String).Trim()
+                        "KeyId"     = ($KeyCred.KeyId | Out-String).Trim()
+                        "Type"      = ($KeyCred.Type | Out-String).Trim()
+                        "Usage"     = ($KeyCred.Usage | Out-String).Trim()
+                    };
+                    $ServicePrincipalObjects += New-Object -TypeName PSObject -Property $ObjectProperties
+                }
             }
         };
-        if($ServicePrincipalObjects.Count -gt 0) {
+        if ($ServicePrincipalObjects.Count -gt 0) {
             try {
                 $ServicePrincipalObjects | Export-Csv -Path "$reportsFolder\ServicePrincipalObjects.csv" -NoTypeInformation -Encoding Default;
                 $ServicePrincipalObjects | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\ServicePrincipalObjects.json";
-            } catch {
+            }
+            catch {
                 Out-LogFile "Unable to write output to disk" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1665,18 +1741,21 @@ if ($continue) {
                 Out-Summary "`rINVESTIGATIVE TIPS:
                 - Threat Actors can create or replace credentials on service principals to act as that principal to evade detection.
                 - NOTE: This is a known SUNBURST TTP." -Summary
-            } catch {
+            }
+            catch {
                 Out-LogFile "There was a problem logging this query" -warning;
                 Write-Error $_.Exception.Message;
                 Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
             }
         }
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to retrieve Service Principal objects" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to retrieve Service Principal";
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     };
@@ -1691,7 +1770,8 @@ if ($continue) {
 $moduleMessage = "Retrieving O365 admin roles";
 if ($Commands -and $Commands -notmatch "O365AdminGroups") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1707,8 +1787,9 @@ if ($Commands -and $Commands -notmatch "O365AdminGroups") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1721,28 +1802,25 @@ if ($continue) {
     };
     $O365AdminGroupReport = New-Object System.Collections.ArrayList;
     $now = Get-Date;
-    $ShortDate = $now.ToShortDateString() -replace "/","";
+    $ShortDate = $now.ToShortDateString() -replace "/", "";
 
     $OutputFileName = "Office365AdminGroupMembers.csv";
 
     #Get the Azure AD roles for the tenant
     try {
-        $AzureADRoles = @(Get-AzureADDirectoryRole -ErrorAction Stop)
-    } catch {
-        if ($_.Exception.Message -ieq "You must call the Connect-AzureAD cmdlet before calling any other cmdlets.") {
-            #Connect to Azure AD
-            try {
-                if($AzureEnvironmentName) {
-                $AzureADConnection = Connect-AzureAD -AzureEnvironmentName $AzureEnvironmentName -ErrorAction Stop 6>$null;
-                }
-                else {
-                $AzureADConnection = Connect-AzureAD -ErrorAction Stop 6>$null;
-                }
-                $AzureADRoles = @(Get-AzureADDirectoryRole -ErrorAction Stop)
-            } catch {
-                throw $_.Exception.Message
+        $AzureADRoles = @(Get-MgDirectoryRole -ErrorAction Stop)
+    }
+    catch {
+        try {
+            if ($AzureEnvironmentName) {
+                $AzureADConnection = Connect-MgGraph -Environment $AzureEnvironmentName -Scopes "Directory.Read.All" -ErrorAction Stop 6>$null;
             }
-        } else {
+            else {
+                $AzureADConnection = Connect-MgGraph -Scopes "Directory.Read.All" -ErrorAction Stop 6>$null;
+            }
+            $AzureADRoles = @(Get-MgDirectoryRole -ErrorAction Stop)
+        }
+        catch {
             throw $_.Exception.Message
         }
     };
@@ -1753,20 +1831,20 @@ if ($continue) {
         Out-LogFile "Processing $($AzureADRole.DisplayName)"
 
         #Get the list of members for the role
-        $RoleMembers = @(Get-AzureADDirectoryRoleMember -ObjectId $AzureADRole.ObjectId)
+        $RoleMembers = @(Get-MgDirectoryRoleMember -DirectoryRoleId $AzureADRole.Id)
 
         #Loop through the list of members
         $counter = 0;
         foreach ($RoleMember in $RoleMembers) {
-            Write-Progress -Activity "Getting Azure AD members" -Status "In progress" -PercentComplete $(($counter/$RoleMembers.Count)*100);
+            Write-Progress -Activity "Getting Azure AD members" -Status "In progress" -PercentComplete $(($counter / $RoleMembers.Count) * 100);
             $ObjectProperties = [Ordered]@{
-                "Role" = $AzureADRole.DisplayName
-                "Display Name" = $RoleMember.DisplayName
-                "Object Type" = $RoleMember.ObjectType
-                "Account Enabled" = $RoleMember.AccountEnabled
+                "Role"                = $AzureADRole.DisplayName
+                "Display Name"        = $RoleMember.DisplayName
+                "Object Type"         = $RoleMember.ObjectType
+                "Account Enabled"     = $RoleMember.AccountEnabled
                 "User Principal Name" = $RoleMember.UserPrincipalName
-                "Password Policies" = $RoleMember.PasswordPolicies
-                "HomePage" = $RoleMember.HomePage
+                "Password Policies"   = $RoleMember.PasswordPolicies
+                "HomePage"            = $RoleMember.HomePage
             }
 
             $RoleMemberObject = New-Object -TypeName PSObject -Property $ObjectProperties
@@ -1781,7 +1859,8 @@ if ($continue) {
         try {
             $O365AdminGroupReport | Export-CSV -Path "$reportsFolder\$OutputFileName" -Force -NoTypeInformation -Encoding Default;
             $O365AdminGroupReport | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\$($OutputFileName.Replace(".csv",".json"))";
-        } catch {
+        }
+        catch {
             Out-LogFile "Unable to write output to disk" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -1796,13 +1875,15 @@ if ($continue) {
             - Review all members of admin groups.
             - Members assigned with the 'ApplicationImpersonation' role can impersonate any account in the tenant.
             - Threat Actors can target these accounts for elevated privileges & to gain access to contents." -Summary
-        } catch {
+        }
+        catch {
             Out-LogFile "There was a problem logging this query" -warning;
             Write-Error $_.Exception.Message;
             Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
         }
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -1817,7 +1898,8 @@ if ($continue) {
 $moduleMessage = "Retrieving Delegate Application Permissions";
 if ($Commands -and $Commands -notmatch "DelegateAppPerms") {
     $continue = $false
-} elseif ($Interactive) {
+}
+elseif ($Interactive) {
     Out-LogFile $moduleMessage;
     $startTimer = [System.Diagnostics.Stopwatch]::StartNew();
     Write-Host $InteractiveMessage;
@@ -1833,8 +1915,9 @@ if ($Commands -and $Commands -notmatch "DelegateAppPerms") {
                 $skip = $true
             }
         }
-    } while((-not $skip) -and (-not $continue))
-} else {
+    } while ((-not $skip) -and (-not $continue))
+}
+else {
     $continue = $true
 };
 
@@ -1848,13 +1931,14 @@ if ($continue) {
     $ADPSOutputFileName = "AzureADPSPermissionsReport.csv";
     # Get tenant details to test that Connect-AzureAD has been called
     try {
-        $tenant_details = Get-AzureADTenantDetail
-    } catch {
-        Out-LogFile "You must call Connect-AzureAD before running this script." -warning
+        $tenant_details = Get-MgOrganization
+    }
+    catch {
+        Out-LogFile "You must call Connect-MgGraph before running this script." -warning
     };
     Out-LogFile ("TenantId: {0}, InitialDomain: {1}" -f `
-                    $tenant_details.ObjectId, `
-                    ($tenant_details.VerifiedDomains | Where-Object { $_.Initial }).Name)
+            $tenant_details.Id, `
+        ($tenant_details.VerifiedDomains | Where-Object { $_.IsInitial }).Name)
 
     # An in-memory cache of objects by {object ID} andy by {object class, object ID}
     $script:ObjectByObjectId = @{};
@@ -1865,50 +1949,35 @@ if ($continue) {
 
     # Get all ServicePrincipal objects and add to the cache
     Out-LogFile "Retrieving all ServicePrincipal objects...";
-    Get-AzureADServicePrincipal -All $true | ForEach-Object {
+    Get-MgServicePrincipal -All | ForEach-Object {
         CacheObject -Object $_
     };
     $servicePrincipalCount = $script:ObjectByObjectClassId['ServicePrincipal'].Count
 
     # Get one page of User objects and add to the cache
     Out-LogFile ("Retrieving up to {0} User objects..." -f 999)
-    Get-AzureADUser -Top 999 | Where-Object {
+    Get-MgUser -Top 999 | Where-Object {
         CacheObject -Object $_
     };
 
-    Out-LogFile "Testing for OAuth2PermissionGrants bug before querying...";
-    $fastQueryMode = $false;
-
-    try {
-        # There's a bug in Azure AD Graph which does not allow for directly listing
-        # oauth2PermissionGrants if there are more than 999 of them. The following line will
-        # trigger this bug (if it still exists) and throw an exception.
-        $null = Get-AzureADOAuth2PermissionGrant -Top 999;
-        $fastQueryMode = $true
-    } catch {
-        if ($_.Exception.Message -and $_.Exception.Message.StartsWith("Unexpected end when deserializing array.")) {
-            Out-LogFile ("Fast query for delegated permissions failed, using slow method...")
-        } else {
-            throw $_
-        }
-    };
+    # Removed OAuth2PermissionGrants bug check as it applies to AzureAD module
 
     # Get all existing OAuth2 permission grants, get the client, resource and scope details
     Out-LogFile "Retrieving OAuth2PermissionGrants...";
 
-    GetOAuth2PermissionGrants -FastMode:$fastQueryMode | ForEach-Object {
+    GetOAuth2PermissionGrants | ForEach-Object {
         $grant = $_;
         if ($grant.Scope) {
             $grant.Scope.Split(" ") | Where-Object { $_ } | ForEach-Object {
 
                 $scope = $_;
 
-                $grantDetails =  [ordered]@{
-                    "PermissionType" = "Delegated"
-                    "ClientObjectId" = $grant.ClientId
-                    "ResourceObjectId" = $grant.ResourceId
-                    "Permission" = $scope
-                    "ConsentType" = $grant.ConsentType
+                $grantDetails = [ordered]@{
+                    "PermissionType"    = "Delegated"
+                    "ClientObjectId"    = $grant.ClientId
+                    "ResourceObjectId"  = $grant.ResourceId
+                    "Permission"        = $scope
+                    "ConsentType"       = $grant.ConsentType
                     "PrincipalObjectId" = $grant.PrincipalId
                 };
 
@@ -1956,13 +2025,13 @@ if ($continue) {
 
         if (-not($ShowProgress)) {
             Write-Progress -Activity "Retrieving application permissions..." `
-                        -Status ("Checked {0}/{1} apps" -f $i++, $servicePrincipalCount) `
-                        -PercentComplete (($i / $servicePrincipalCount) * 100)
+                -Status ("Checked {0}/{1} apps" -f $i++, $servicePrincipalCount) `
+                -PercentComplete (($i / $servicePrincipalCount) * 100)
         };
 
         $sp = $_.Value;
 
-        Get-AzureADServiceAppRoleAssignedTo -ObjectId $sp.ObjectId -All $true `
+        Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All `
         | Where-Object { $_.PrincipalType -eq "ServicePrincipal" } | ForEach-Object {
             $assignment = $_;
 
@@ -1970,10 +2039,10 @@ if ($continue) {
             $appRole = $resource.AppRoles | Where-Object { $_.Id -eq $assignment.Id };
 
             $grantDetails = [ordered]@{
-                "PermissionType" = "Application"
-                "ClientObjectId" = $assignment.PrincipalId
+                "PermissionType"   = "Application"
+                "ClientObjectId"   = $assignment.PrincipalId
                 "ResourceObjectId" = $assignment.ResourceId
-                "Permission" = $appRole.Value
+                "Permission"       = $appRole.Value
             };
 
             # Add properties for client and resource service principals
@@ -1997,7 +2066,8 @@ if ($continue) {
     try {
         $data | Export-CSV -Path "$reportsFolder\$ADPSOutputFileName" -Force -NoTypeInformation -Encoding Default;
         $data | ConvertTo-Json -Depth 10 | Out-File "$jsonFolder\$($ADPSOutputFileName.Replace(".csv",".json"))"
-    } catch {
+    }
+    catch {
         Out-LogFile "Unable to write output to disk" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] Unable to write output to disk"
@@ -2013,12 +2083,14 @@ if ($continue) {
         - Any suspicious apps identified should have authentication activity reviewed.
         - Threat Actors can add permissions to these Azure AD apps for long-term lowered visibility access to contacts, mail, notes, mailbox settings, user directory, and files.
         - NOTE: This is a known SUNBURST TTP." -Summary
-    } catch {
+    }
+    catch {
         Out-LogFile "There was a problem logging this query" -warning;
         Write-Error $_.Exception.Message;
         Write-Host -ForegroundColor Red "[!] There was a problem logging this query"
     };
-} else {
+}
+else {
     if ($Interactive) {
         Write-Host $InteractiveSkipMessage
     }
@@ -2032,8 +2104,9 @@ if ($continue) {
 try {
     Disconnect-ExchangeOnline -Confirm:$false 6>$null;
     Out-LogFile "Disconnected from Exchange Online";
-    Disconnect-AzureAD | Out-Null;
-    Out-LogFile "Disconnected from Azure AD"
-} catch {
+    Disconnect-MgGraph | Out-Null;
+    Out-LogFile "Disconnected from Microsoft Graph"
+}
+catch {
     Write-Error $_.Exception.Message
 }
