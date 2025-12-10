@@ -1,4 +1,4 @@
-## CrowdStrike Reporting Tool for Azure (CRT)
+## QuiteHacker Reporting Tool for Azure
 
 This tool queries the following configurations in the Azure AD/O365 tenant which can shed light on hard-to-find permissions and configuration settings in order to assist organizations in securing these environments.
 
@@ -41,32 +41,32 @@ When Global Admin privileges are not available, the tool will notify you about w
 
 No parameters specified: _A folder named with date and time (YYYYDDMMTHHMM) will be created automatically in the directory the script is being run from. Default authentication method will prompt for each connection for compatibility with MFA._
 ```
-.\Get-CRTReport.ps1
+.\Get-AzureReport.ps1
 ```
 `-BasicAuth` Parameter:
 _[OPTIONAL] If MFA is not enforced for your user principal, you can use this parameter which will prompt only once for authentication and store credentials using `Get-Credential`. (Not Recommended)_
 ```
-.\Get-CRTReport.ps1 -BasicAuth
+.\Get-AzureReport.ps1 -BasicAuth
 ```
 `-JobName` Parameter:
 _[OPTIONAL] Use the JobName parameter to distinguish between different tenants. If no JobName is specified, a Date/Time formatted folder will be placed within the working directory._
 ```
-.\Get-CRTReport.ps1 -JobName MyJobName
+.\Get-AzureReport.ps1 -JobName MyJobName
 ```
 `-WorkingDirectory` Parameter:
 _[OPTIONAL] If you want to specify a different working directory for your jobs, you can do so with this parameter. The default working directory is the directory the script is being run from._
 ```
-.\Get-CRTReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder'
+.\Get-AzureReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder'
 ```
 `-Commands` Parameter:
 _[OPTIONAL] With this parameter, specify the specific commands you want to run in quotes, comma or space separated._
 ```
-.\Get-CRTReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder' -Commands "Command1,Command2"
+.\Get-AzureReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder' -Commands "Command1,Command2"
 ```
 `-AzureEnvironmentName & -ExchangeEnvironmentName` Parameter:
 _[OPTIONAL] With this parameter, specify the Azure or Exchange environment names. Using tab complete you can search the acceptable values._
 ```
-.\Get-CRTReport.ps1 -ExchangeEnvironmentName O365USGovGCCHigh -AzureEnvironmentName AzureUSGovernment
+.\Get-AzureReport.ps1 -ExchangeEnvironmentName O365USGovGCCHigh -AzureEnvironmentName AzureUSGovernment
 ```
 Available Commands:
 ```
@@ -91,15 +91,15 @@ AdminAuditLogConfig
 `-Interactive` Parameter:
 _[OPTIONAL] Some commands may take a long time to process depending on the amount of data in the tenant. Using the Interactive parameter, you will have the option to skip any particular command prior to the module running._
 ```
-.\Get-CRTReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder' -Interactive
+.\Get-AzureReport.ps1 -JobName MyJobName -WorkingDirectory 'C:\Path\to\Job\Folder' -Interactive
 ```
 
 ### Report Summary:
-With each run, CRT will output a report for each query in json as well as more readable, .TXT and .CSV formats:
+With each run, the tool will output a report for each query in json as well as more readable, .TXT and .CSV formats:
 
 No parameters specified: _A folder named with date and time (YYYYDDMMTHHMM) will be created automatically in the directory the script is being run from. To support MFA, the default authentication method will prompt the user to login for each connection._
 - `YYYYDDMMTHHMM\output.log` (hard copy of console logging)
-- `YYYYDDMMTHHMM\_CRTReportSummary.txt` (Summary of scripts run and investigative tips for guidance)
+- `YYYYDDMMTHHMM\_ARTReportSummary.txt` (Summary of scripts run and investigative tips for guidance)
 - `YYYYDDMMTHHMM\Reports\<report>.csv` (Report in CSV output, where applicable)
 - `YYYYDDMMTHHMM\Reports\<report>.txt` (Report in TXT output, where applicable)
 - `YYYYDDMMTHHMM\Reports\json\<report>.json` (Each report is accompanied by JSON output for additional verbosity)
@@ -118,4 +118,4 @@ Get-EXOMailbox -ResultSize Unlimited | Get-EXOMailboxPermission | Where-Object {
 
 If you've found a bug, please use the Issues tab to report a new issue or add your comments to an existing one.
 
-If you have any recommendations for the tool or require critical escalation, please email: CRT@crowdstrike.com.
+If you have any recommendations for the tool, please open an Issue.
