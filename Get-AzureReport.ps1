@@ -146,11 +146,12 @@ Process {
 
                         if ($logCollection) {
                             foreach ($item in $logCollection) {
-                                if ($item.Enabled) {
-                                    if ($item.Category) { 
+                                # Ensure item is not null before checking properties
+                                if ($null -ne $item -and $item.Enabled) {
+                                    if ($item.PSObject.Properties['Category'] -and $item.Category) { 
                                         $enabledLogs.Add($item.Category) 
                                     }
-                                    elseif ($item.CategoryGroup) { 
+                                    elseif ($item.PSObject.Properties['CategoryGroup'] -and $item.CategoryGroup) { 
                                         $enabledLogs.Add("Group:$($item.CategoryGroup)") 
                                     }
                                 }
