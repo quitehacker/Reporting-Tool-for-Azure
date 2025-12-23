@@ -204,6 +204,7 @@ Process {
             }
             catch {
                 # Quietly ignore individual resource failures to keep flow going
+                Write-Warning "Failed to audit resource '$($res.Name)': $_"
             }
         }
         Write-Progress -Activity "Auditing Subscription: $($sub.Name)" -Completed
