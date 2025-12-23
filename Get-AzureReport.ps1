@@ -47,7 +47,7 @@ Begin {
 
     # Login Check
     try {
-        $msgContext = Get-AzContext -ErrorAction Stop
+        Get-AzContext -ErrorAction Stop | Out-Null
     }
     catch {
         Write-Error "No Azure context found. Please run 'Connect-AzAccount' to login."
