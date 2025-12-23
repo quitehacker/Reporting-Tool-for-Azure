@@ -68,7 +68,8 @@ Save the CSV report to a specific folder.
 | ResourceGroup | Resource Group name |
 | Location | Azure Region |
 | DiagnosticConfigured | "Yes" if settings exist, "No" otherwise |
-| LogsEnabled | Semicolon-separated list of enabled log categories |
+| SettingName | Name of the specific diagnostic setting (useful if multiple exist) |
+| LogsEnabled | List of enabled logs and metrics (e.g., `Administrative; Group:allLogs; Metric:AllMetrics`) |
 | LAWorkspaceName | Name of the destination Log Analytics Workspace (derived from ID) |
 | LAWorkspaceId | Resource ID of the Log Analytics Workspace |
 | StorageAccount | Resource ID of the destination Storage Account |
