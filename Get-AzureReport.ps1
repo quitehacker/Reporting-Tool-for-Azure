@@ -173,6 +173,20 @@ Process {
                                 }
                             }
                         }
+
+                        # Check Metrics
+                        # Similar logic: check 'Metric' or 'Metrics' property
+                        $metricCollection = @()
+                        if ($ds.Metrics) { $metricCollection += $ds.Metrics }
+                        try { if ($ds.Metric) { $metricCollection += $ds.Metric } } catch {}
+
+                        if ($metricCollection) {
+                            foreach ($m in $metricCollection) {
+                                if ($null -ne $m -and $m.Enabled -eq $true) {
+                                    $enabledLogs.Add("Metric:$($m.Category)")
+                                }
+                            }
+                        }
                         
                         # Some resources might still use top-level 'CategoryGroups' property
                         if ($ds.CategoryGroups) {
