@@ -141,18 +141,28 @@ Process {
                         if ($ds.StorageAccountId) { $storageId = $ds.StorageAccountId }
                         if ($ds.EventHubAuthorizationRuleId) { $eventHubId = $ds.EventHubAuthorizationRuleId }
                         
-                        # Consolidate 'Logs' and 'Log' properties
-                        $logCollection = if ($ds.Logs) { $ds.Logs } elseif ($ds.PSObject.Properties['Log']) { $ds.Log } else { $null }
+                        # Consolidate 'Logs' and 'Log' properties safely
+                        $logCollection = @()
+                        if ($ds.Logs) { $logCollection += $ds.Logs }
+                        
+                        # Check strictly for Log property to avoid errors if it missing
+                        # Using Try-Catch for property access just in case, or relying on PS loose typing
+                        try {
+                            if ($ds.Log) { $logCollection += $ds.Log }
+                        }
+                        catch {}
 
                         if ($logCollection) {
                             foreach ($item in $logCollection) {
-                                # Ensure item is not null before checking properties
-                                if ($null -ne $item -and $item.Enabled) {
-                                    if ($item.PSObject.Properties['Category'] -and $item.Category) { 
-                                        $enabledLogs.Add($item.Category) 
+                                # Safe check for Enabled
+                                if ($null -ne $item -and $item.Enabled -eq $true) {
+                                    # Check Category
+                                    if (-not [string]::IsNullOrEmpty($item.Category)) {
+                                        $enabledLogs.Add($item.Category)
                                     }
-                                    elseif ($item.PSObject.Properties['CategoryGroup'] -and $item.CategoryGroup) { 
-                                        $enabledLogs.Add("Group:$($item.CategoryGroup)") 
+                                    # Check CategoryGroup
+                                    elseif (-not [string]::IsNullOrEmpty($item.CategoryGroup)) {
+                                        $enabledLogs.Add("Group:$($item.CategoryGroup)")
                                     }
                                 }
                             }
