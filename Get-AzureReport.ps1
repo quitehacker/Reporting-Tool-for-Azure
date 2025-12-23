@@ -130,11 +130,8 @@ Process {
                 if ($diagSettings) {
                     # One, row per diagnostic setting
                     foreach ($ds in $diagSettings) {
-                        $laWorkspaceId = $null
-                        $laWorkspaceName = $null
-                        $storageId = $null
-                        $eventHubId = $null
-                        $enabledLogs = [System.Collections.Generic.List[string]]::new()
+                        # DEBUG: Inspect the object safely
+                        Write-Host "DEBUG: $($ds | Select-Object * | Out-String)" -ForegroundColor Gray
 
                         if ($ds.WorkspaceId) { 
                             $laWorkspaceId = $ds.WorkspaceId 
@@ -145,12 +142,20 @@ Process {
                         if ($ds.StorageAccountId) { $storageId = $ds.StorageAccountId }
                         if ($ds.EventHubAuthorizationRuleId) { $eventHubId = $ds.EventHubAuthorizationRuleId }
                         
+                        # Check Standard 'Logs'
                         if ($ds.Logs) {
                             foreach ($log in $ds.Logs) {
                                 if ($log.Enabled) { $enabledLogs.Add($log.Category) }
                             }
                         }
-                        # Also check for 'CategoryGroups' (e.g. 'allLogs', 'audit')
+                        # Check Legacy/Alternate 'Log'
+                        elseif ($ds.PSObject.Properties['Log']) {
+                            foreach ($log in $ds.Log) {
+                                if ($log.Enabled) { $enabledLogs.Add($log.Category) }
+                            }
+                        }
+                        
+                        # Check 'CategoryGroups'
                         if ($ds.CategoryGroups) {
                             foreach ($cg in $ds.CategoryGroups) {
                                 if ($cg.Enabled) { $enabledLogs.Add("Group:$($cg.GroupName)") }
