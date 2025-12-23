@@ -122,19 +122,20 @@ Process {
                 Write-Progress -Activity "Auditing Subscription: $($sub.Name)" -Status "Processing resource $resCounter of $count" -PercentComplete (($resCounter / $count) * 100)
             }
 
-            $diagStatus = "No"
-            $laWorkspaceId = $null
-            $laWorkspaceName = $null
-            $storageId = $null
-            $eventHubId = $null
-            $enabledLogs = [System.Collections.Generic.List[string]]::new()
+            
             
             try {
                 $diagSettings = Get-AzDiagnosticSetting -ResourceId $res.ResourceId -ErrorAction SilentlyContinue
                 
                 if ($diagSettings) {
-                    $diagStatus = "Yes"
+                    # One, row per diagnostic setting
                     foreach ($ds in $diagSettings) {
+                        $laWorkspaceId = $null
+                        $laWorkspaceName = $null
+                        $storageId = $null
+                        $eventHubId = $null
+                        $enabledLogs = [System.Collections.Generic.List[string]]::new()
+
                         if ($ds.WorkspaceId) { 
                             $laWorkspaceId = $ds.WorkspaceId 
                             if ($laWorkspaceId -match "/workspaces/([^/]+)$") {
@@ -149,28 +150,54 @@ Process {
                                 if ($log.Enabled) { $enabledLogs.Add($log.Category) }
                             }
                         }
+                        # Also check for 'CategoryGroups' (e.g. 'allLogs', 'audit')
+                        if ($ds.CategoryGroups) {
+                            foreach ($cg in $ds.CategoryGroups) {
+                                if ($cg.Enabled) { $enabledLogs.Add("Group:$($cg.GroupName)") }
+                            }
+                        }
+
+                        $obj = [PSCustomObject]@{
+                            SubscriptionName     = $sub.Name
+                            SubscriptionId       = $sub.Id
+                            ResourceName         = $res.Name
+                            ResourceType         = $res.ResourceType
+                            ResourceGroup        = $res.ResourceGroupName
+                            Location             = $res.Location
+                            DiagnosticConfigured = "Yes"
+                            SettingName          = $ds.Name
+                            LogsEnabled          = if ($enabledLogs.Count -gt 0) { $enabledLogs -join "; " } else { "None" }
+                            LAWorkspaceName      = $laWorkspaceName
+                            LAWorkspaceId        = $laWorkspaceId
+                            StorageAccount       = $storageId
+                            EventHub             = $eventHubId
+                        }
+                        $globalResults.Add($obj)
                     }
+                }
+                else {
+                    # No settings found
+                    $obj = [PSCustomObject]@{
+                        SubscriptionName     = $sub.Name
+                        SubscriptionId       = $sub.Id
+                        ResourceName         = $res.Name
+                        ResourceType         = $res.ResourceType
+                        ResourceGroup        = $res.ResourceGroupName
+                        Location             = $res.Location
+                        DiagnosticConfigured = "No"
+                        SettingName          = $null
+                        LogsEnabled          = $null
+                        LAWorkspaceName      = $null
+                        LAWorkspaceId        = $null
+                        StorageAccount       = $null
+                        EventHub             = $null
+                    }
+                    $globalResults.Add($obj)
                 }
             }
             catch {
                 # Quietly ignore individual resource failures to keep flow going
             }
-            
-            $obj = [PSCustomObject]@{
-                SubscriptionName     = $sub.Name
-                SubscriptionId       = $sub.Id
-                ResourceName         = $res.Name
-                ResourceType         = $res.ResourceType
-                ResourceGroup        = $res.ResourceGroupName
-                Location             = $res.Location
-                DiagnosticConfigured = $diagStatus
-                LogsEnabled          = if ($enabledLogs.Count -gt 0) { $enabledLogs -join "; " } else { "None" }
-                LAWorkspaceName      = $laWorkspaceName
-                LAWorkspaceId        = $laWorkspaceId
-                StorageAccount       = $storageId
-                EventHub             = $eventHubId
-            }
-            $globalResults.Add($obj)
         }
         Write-Progress -Activity "Auditing Subscription: $($sub.Name)" -Completed
     }
