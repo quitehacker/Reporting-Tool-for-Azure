@@ -1,18 +1,19 @@
 <#
 .SYNOPSIS
-    Audits Azure Diagnostic Settings across all resources in a subscription.
+    Audits Azure Diagnostic Settings across all resources in one or ALL subscriptions.
 
 .DESCRIPTION
-    This script retrieves all resources in a specified Azure subscription (or the current context)
-    and checks if Diagnostic Settings are configured for each resource.
+    This script audits resources for Diagnostic Settings configuration. 
+    It can target a specific subscription or automatically iterate through ALL accessible subscriptions.
     It captures details such as Log Analytics workspace, Storage Account, Event Hub, and enabled log categories.
-    Results are exported to a CSV file and a summary is displayed in the console.
+    Results are exported to a single consolidated CSV file.
 
 .PARAMETER SubscriptionId
-    Optional. The ID of the subscription to audit. If not provided, the current context's subscription is used.
+    Optional. The ID of a specific subscription to audit. 
+    If NOT provided, the script will audit ALL subscriptions accessible to the current user.
 
 .PARAMETER ResourceGroupName
-    Optional. audits only resources within the specified Resource Group.
+    Optional. audits only resources within the specified Resource Group (applies to all checked subscriptions).
 
 .PARAMETER ResourceType
     Optional. Audits only resources of the specified type (e.g., 'Microsoft.Compute/virtualMachines').
@@ -21,16 +22,12 @@
     Optional. The directory where the CSV report will be saved. Defaults to the current script directory.
 
 .EXAMPLE
-    .\Get-AzureDiagnosticAudit.ps1
-    Audits all resources in the current subscription.
+    .\Get-AzureReport.ps1
+    Audits ALL subscriptions accessible to the user.
 
 .EXAMPLE
-    .\Get-AzureDiagnosticAudit.ps1 -ResourceGroupName "my-rg"
-    Audits only resources in the resource group 'my-rg'.
-
-.EXAMPLE
-    .\Get-AzureDiagnosticAudit.ps1 -SubscriptionId "00000000-0000-0000-0000-000000000000" -Verbose
-    Audits a specific subscription with verbose output.
+    .\Get-AzureReport.ps1 -SubscriptionId "00000000-0000-0000-0000-000000000000"
+    Audits only the specified subscription.
 #>
 
 [CmdletBinding()]
@@ -50,152 +47,161 @@ Begin {
 
     # Login Check
     try {
-        $context = Get-AzContext -ErrorAction Stop
+        $msgContext = Get-AzContext -ErrorAction Stop
     }
     catch {
         Write-Error "No Azure context found. Please run 'Connect-AzAccount' to login."
     }
 
-    # Set Subscription
+    # Determine Target Subscriptions
+    $targetSubscriptions = @()
+
     if (-not [string]::IsNullOrEmpty($SubscriptionId)) {
-        try {
-            Write-Verbose "Setting context to subscription: $SubscriptionId"
-            Set-AzContext -SubscriptionId $SubscriptionId -Force | Out-Null
-            $context = Get-AzContext
-        }
-        catch {
-            Write-Error "Failed to set subscription with ID '$SubscriptionId'. Error: $_"
-        }
+        # User specified a single subscription
+        $sub = Get-AzSubscription -SubscriptionId $SubscriptionId -ErrorAction Stop
+        $targetSubscriptions += $sub
+        Write-Host "Targeting specific subscription: $($sub.Name)" -ForegroundColor Green
+    }
+    else {
+        # Audit ALL subscriptions
+        Write-Host "No SubscriptionId provided. Retrieving ALL accessible subscriptions..." -ForegroundColor Cyan
+        $targetSubscriptions = Get-AzSubscription
+        Write-Host "Found $($targetSubscriptions.Count) subscriptions to audit." -ForegroundColor Green
     }
 
-    $SubName = $context.Subscription.Name
-    $SubId = $context.Subscription.Id
-    Write-Host "Target Subscription: $SubName ($SubId)" -ForegroundColor Green
-
-    # Define resources that ignore diagnostic settings generally or cause noise (Optional refinement)
-    # For now, we audit everything returned by Get-AzResource.
-    
     $timestamp = Get-Date -Format "yyyyMMdd-HHmm"
-    $csvFileName = "AzureDiagAudit_$($SubName -replace '[^a-zA-Z0-9]','_')_$timestamp.csv"
+    $filenameSuffix = if ($targetSubscriptions.Count -eq 1) { $targetSubscriptions[0].Name -replace '[^a-zA-Z0-9]', '_' } else { "AllSubscriptions" }
+    $csvFileName = "AzureDiagAudit_$($filenameSuffix)_$timestamp.csv"
     $fullCsvPath = Join-Path -Path $OutputPath -ChildPath $csvFileName
+    
+    $globalResults = [System.Collections.Generic.List[PSObject]]::new()
 }
 
 Process {
-    Write-Host "Retrieving resources..." -ForegroundColor Cyan
+    $subCounter = 0
     
-    $params = @{}
-    if ($ResourceGroupName) { $params['ResourceGroupName'] = $ResourceGroupName }
-    if ($ResourceType) { $params['ResourceType'] = $ResourceType }
+    foreach ($sub in $targetSubscriptions) {
+        $subCounter++
+        Write-Host "`n[$subCounter/$($targetSubscriptions.Count)] Processing Subscription: $($sub.Name) ($($sub.Id))" -ForegroundColor Magenta
+        
+        try {
+            # Set Context
+            Set-AzContext -SubscriptionId $sub.Id -Force | Out-Null
+        }
+        catch {
+            Write-Warning "Failed to set context for subscription '$($sub.Name)'. Skipping... Error: $_"
+            continue
+        }
 
-    try {
-        $resources = Get-AzResource @params
-    }
-    catch {
-        Write-Error "Failed to retrieve resources. Error: $_"
-    }
-
-    $totalResources = $resources.Count
-    if ($totalResources -eq 0) {
-        Write-Warning "No resources found matching the criteria."
-        return
-    }
-    Write-Host "Found $totalResources resources. Starting audit..." -ForegroundColor Cyan
-
-    $results = [System.Collections.Generic.List[PSObject]]::new()
-    
-    $counter = 0
-    foreach ($res in $resources) {
-        $counter++
-        $percentComplete = [int](($counter / $totalResources) * 100)
-        Write-Progress -Activity "Auditing Resources" -Status "Processing $($res.Name)" -PercentComplete $percentComplete -CurrentOperation "$counter / $totalResources"
-
-        $diagStatus = "No"
-        $laWorkspaceId = $null
-        $laWorkspaceName = $null
-        $storageId = $null
-        $eventHubId = $null
-        $enabledLogs = [System.Collections.Generic.List[string]]::new()
-        $hasSettableDiagnostics = $true
+        # Retrieve Resources
+        $params = @{}
+        if ($ResourceGroupName) { $params['ResourceGroupName'] = $ResourceGroupName }
+        if ($ResourceType) { $params['ResourceType'] = $ResourceType }
 
         try {
-            # Some resource types might not support diagnostic settings, but Get-AzDiagnosticSetting usually returns empty or clean error?
-            # We treat errors as "Not Supported" or "Error".
-            # Note: Get-AzDiagnosticSetting requires the resource ID.
+            Write-Host "  Retrieving resources..." -ForegroundColor Gray
+            $resources = Get-AzResource @params
+        }
+        catch {
+            Write-Warning "  Failed to retrieve resources for subscription '$($sub.Name)'. Error: $_"
+            continue
+        }
+
+        $count = $resources.Count
+        if ($count -eq 0) {
+            Write-Host "  No resources found." -ForegroundColor DarkGray
+            continue
+        }
+        Write-Host "  Found $count resources. Auditing..." -ForegroundColor Cyan
+
+        # Audit Loop
+        $resCounter = 0
+        foreach ($res in $resources) {
+            $resCounter++
+            if ($resCounter % 10 -eq 0) {
+                Write-Progress -Activity "Auditing Subscription: $($sub.Name)" -Status "Processing resource $resCounter of $count" -PercentComplete (($resCounter / $count) * 100)
+            }
+
+            $diagStatus = "No"
+            $laWorkspaceId = $null
+            $laWorkspaceName = $null
+            $storageId = $null
+            $eventHubId = $null
+            $enabledLogs = [System.Collections.Generic.List[string]]::new()
             
-            $diagSettings = Get-AzDiagnosticSetting -ResourceId $res.ResourceId -ErrorAction SilentlyContinue
-            
-            if ($diagSettings) {
-                $diagStatus = "Yes"
+            try {
+                $diagSettings = Get-AzDiagnosticSetting -ResourceId $res.ResourceId -ErrorAction SilentlyContinue
                 
-                # There can be multiple diagnostic settings. We will concatenate info or take the first valid one?
-                # Requirement implies checking if configured. We'll summarize.
-                
-                foreach ($ds in $diagSettings) {
-                    if ($ds.WorkspaceId) { 
-                        $laWorkspaceId = $ds.WorkspaceId 
-                        # Attempt to extract name from ID if possible
-                        if ($laWorkspaceId -match "/workspaces/([^/]+)$") {
-                            $laWorkspaceName = $matches[1]
+                if ($diagSettings) {
+                    $diagStatus = "Yes"
+                    foreach ($ds in $diagSettings) {
+                        if ($ds.WorkspaceId) { 
+                            $laWorkspaceId = $ds.WorkspaceId 
+                            if ($laWorkspaceId -match "/workspaces/([^/]+)$") {
+                                $laWorkspaceName = $matches[1]
+                            }
                         }
-                    }
-                    if ($ds.StorageAccountId) { $storageId = $ds.StorageAccountId }
-                    if ($ds.EventHubAuthorizationRuleId) { $eventHubId = $ds.EventHubAuthorizationRuleId }
-                    
-                    # Logs
-                    if ($ds.Logs) {
-                        foreach ($log in $ds.Logs) {
-                            if ($log.Enabled) {
-                                $enabledLogs.Add($log.Category)
+                        if ($ds.StorageAccountId) { $storageId = $ds.StorageAccountId }
+                        if ($ds.EventHubAuthorizationRuleId) { $eventHubId = $ds.EventHubAuthorizationRuleId }
+                        
+                        if ($ds.Logs) {
+                            foreach ($log in $ds.Logs) {
+                                if ($log.Enabled) { $enabledLogs.Add($log.Category) }
                             }
                         }
                     }
                 }
             }
+            catch {
+                # Quietly ignore individual resource failures to keep flow going
+            }
+            
+            $obj = [PSCustomObject]@{
+                SubscriptionName     = $sub.Name
+                SubscriptionId       = $sub.Id
+                ResourceName         = $res.Name
+                ResourceType         = $res.ResourceType
+                ResourceGroup        = $res.ResourceGroupName
+                Location             = $res.Location
+                DiagnosticConfigured = $diagStatus
+                LogsEnabled          = if ($enabledLogs.Count -gt 0) { $enabledLogs -join "; " } else { "None" }
+                LAWorkspaceName      = $laWorkspaceName
+                LAWorkspaceId        = $laWorkspaceId
+                StorageAccount       = $storageId
+                EventHub             = $eventHubId
+            }
+            $globalResults.Add($obj)
         }
-        catch {
-            $hasSettableDiagnostics = $false
-            Write-Verbose "Could not get diagnostics for $($res.Name) ($($res.ResourceType)). Error: $_"
-        }
-        
-        $obj = [PSCustomObject]@{
-            ResourceName         = $res.Name
-            ResourceType         = $res.ResourceType
-            ResourceGroup        = $res.ResourceGroupName
-            Location             = $res.Location
-            DiagnosticConfigured = $diagStatus
-            LogsEnabled          = if ($enabledLogs.Count -gt 0) { $enabledLogs -join "; " } else { "None" }
-            LAWorkspaceName      = $laWorkspaceName
-            LAWorkspaceId        = $laWorkspaceId
-            StorageAccount       = $storageId
-            EventHub             = $eventHubId
-            Subscription         = $SubName
-        }
-        
-        $results.Add($obj)
+        Write-Progress -Activity "Auditing Subscription: $($sub.Name)" -Completed
     }
-    Write-Progress -Activity "Auditing Resources" -Completed
 
     # Export
-    try {
-        $results | Export-Csv -Path $fullCsvPath -NoTypeInformation -Force
-        Write-Host "Results exported to: $fullCsvPath" -ForegroundColor Green
+    if ($globalResults.Count -gt 0) {
+        try {
+            $globalResults | Export-Csv -Path $fullCsvPath -NoTypeInformation -Force
+            Write-Host "`nSUCCESS: Audit completed. Results exported to: $fullCsvPath" -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Failed to export CSV. Error: $_"
+        }
     }
-    catch {
-        Write-Error "Failed to export CSV. Error: $_"
+    else {
+        Write-Warning "No resources were audited across any subscription."
     }
 
     # Summary Stats
-    $settingsYes = ($results | Where-Object { $_.DiagnosticConfigured -eq "Yes" }).Count
-    $settingsNo = $totalResources - $settingsYes
+    Write-Host "`nSummary Statistics (All Subscriptions)" -ForegroundColor Yellow
+    Write-Host "--------------------------------------" -ForegroundColor Yellow
+    Write-Host "Total Subscriptions Scanned  : $($targetSubscriptions.Count)"
+    Write-Host "Total Resources Checked      : $($globalResults.Count)"
     
-    $laCounts = $results | Where-Object { $_.LAWorkspaceName } | Group-Object LAWorkspaceName
-
-    Write-Host "`nSummary Statistics" -ForegroundColor Yellow
-    Write-Host "------------------" -ForegroundColor Yellow
-    Write-Host "Total Resources Checked      : $totalResources"
+    $settingsYes = ($globalResults | Where-Object { $_.DiagnosticConfigured -eq "Yes" }).Count
+    $settingsNo = ($globalResults.Count) - $settingsYes
+    
     Write-Host "With Diagnostic Settings     : $settingsYes"
     Write-Host "Without Diagnostic Settings  : $settingsNo"
     
+    $laCounts = $globalResults | Where-Object { $_.LAWorkspaceName } | Group-Object LAWorkspaceName
     if ($laCounts) {
         Write-Host "`nLog Analytics Destination Counts:" -ForegroundColor Yellow
         foreach ($la in $laCounts) {
@@ -204,5 +210,5 @@ Process {
     }
 }
 End {
-    Write-Host "`nAudit Complete." -ForegroundColor Cyan
+    Write-Host "`nScript Execution Finished." -ForegroundColor Cyan
 }
