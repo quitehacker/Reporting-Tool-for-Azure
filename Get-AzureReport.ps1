@@ -130,8 +130,7 @@ Process {
                 if ($diagSettings) {
                     # One, row per diagnostic setting
                     foreach ($ds in $diagSettings) {
-                        # DEBUG: Inspect the object safely
-                        Write-Host "DEBUG: $($ds | Select-Object * | Out-String)" -ForegroundColor Gray
+
 
                         if ($ds.WorkspaceId) { 
                             $laWorkspaceId = $ds.WorkspaceId 
@@ -142,20 +141,23 @@ Process {
                         if ($ds.StorageAccountId) { $storageId = $ds.StorageAccountId }
                         if ($ds.EventHubAuthorizationRuleId) { $eventHubId = $ds.EventHubAuthorizationRuleId }
                         
-                        # Check Standard 'Logs'
-                        if ($ds.Logs) {
-                            foreach ($log in $ds.Logs) {
-                                if ($log.Enabled) { $enabledLogs.Add($log.Category) }
-                            }
-                        }
-                        # Check Legacy/Alternate 'Log'
-                        elseif ($ds.PSObject.Properties['Log']) {
-                            foreach ($log in $ds.Log) {
-                                if ($log.Enabled) { $enabledLogs.Add($log.Category) }
+                        # Consolidate 'Logs' and 'Log' properties
+                        $logCollection = if ($ds.Logs) { $ds.Logs } elseif ($ds.PSObject.Properties['Log']) { $ds.Log } else { $null }
+
+                        if ($logCollection) {
+                            foreach ($item in $logCollection) {
+                                if ($item.Enabled) {
+                                    if ($item.Category) { 
+                                        $enabledLogs.Add($item.Category) 
+                                    }
+                                    elseif ($item.CategoryGroup) { 
+                                        $enabledLogs.Add("Group:$($item.CategoryGroup)") 
+                                    }
+                                }
                             }
                         }
                         
-                        # Check 'CategoryGroups'
+                        # Some resources might still use top-level 'CategoryGroups' property
                         if ($ds.CategoryGroups) {
                             foreach ($cg in $ds.CategoryGroups) {
                                 if ($cg.Enabled) { $enabledLogs.Add("Group:$($cg.GroupName)") }
