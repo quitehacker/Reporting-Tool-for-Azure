@@ -1,6 +1,6 @@
 # Azure Diagnostic Settings Audit Tool
 
-This repository contains a PowerShell script `Get-AzureDiagnosticAudit.ps1` designed to audit Diagnostic Settings across all resources in an Azure Subscription.
+This repository contains a PowerShell script `Get-AzureReport.ps1` designed to audit Diagnostic Settings across all resources in an Azure Subscription.
 
 ## Features
 
@@ -29,34 +29,34 @@ If you are auditing a specific Resource Group, you only need permissions on that
 
 ## Usage
 
-### 1. Basic Audit (Current Subscription)
-Runs the audit on the currently active Azure subscription context.
+### 1. Audit ALL Subscriptions (Default)
+This is the default behavior. The script will iterate through every subscription you have access to.
 ```powershell
-.\Get-AzureDiagnosticAudit.ps1
+.\Get-AzureReport.ps1
 ```
 
-### 2. Audit Specific Resource Group
-Limit the audit to a specific resource group.
+### 2. Audit Specific Subscription
+Limit the audit to a single specific subscription.
 ```powershell
-.\Get-AzureDiagnosticAudit.ps1 -ResourceGroupName "rg-production-01"
+.\Get-AzureReport.ps1 -SubscriptionId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 ```
 
-### 3. Audit Specific Subscription
-Switch context to a specific subscription ID before auditing.
+### 3. Audit Specific Resource Group
+Limit the audit to a specific resource group (will check for this RG in all subscriptions, or the specific one if provided).
 ```powershell
-.\Get-AzureDiagnosticAudit.ps1 -SubscriptionId "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+.\Get-AzureReport.ps1 -ResourceGroupName "rg-production-01"
 ```
 
 ### 4. Filter by Resource Type
 Audit only specific resources, such as Virtual Machines.
 ```powershell
-.\Get-AzureDiagnosticAudit.ps1 -ResourceType "Microsoft.Compute/virtualMachines"
+.\Get-AzureReport.ps1 -ResourceType "Microsoft.Compute/virtualMachines"
 ```
 
 ### 5. Custom Output Path
 Save the CSV report to a specific folder.
 ```powershell
-.\Get-AzureDiagnosticAudit.ps1 -OutputPath "C:\Reports\Azure"
+.\Get-AzureReport.ps1 -OutputPath "C:\Reports\Azure"
 ```
 
 ## Output CSV Columns
