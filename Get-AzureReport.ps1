@@ -132,6 +132,12 @@ Process {
                     foreach ($ds in $diagSettings) {
 
 
+                        $laWorkspaceId = $null
+                        $laWorkspaceName = $null
+                        $storageId = $null
+                        $eventHubId = $null
+                        $enabledLogs = [System.Collections.Generic.List[string]]::new()
+
                         if ($ds.WorkspaceId) { 
                             $laWorkspaceId = $ds.WorkspaceId 
                             if ($laWorkspaceId -match "/workspaces/([^/]+)$") {
